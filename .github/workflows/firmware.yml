@@ -1,0 +1,28 @@
+name: firmware
+on: [push, workflow_dispatch]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: src, fetch-depth: 0}
+      - uses: actions/checkout@v4
+        with: {repository: FoloToy/ai-passport, path: ai-passport}
+      - name: pick newest sources
+        run: |
+          cd src; best=; bt=0
+          for f in $(git ls-files | grep -E '(^|/)main/sim_world\.c$'); do d=$(dirname "$f"); t=$(git log -1 --format=%ct -- "$d"); echo "$d $t"; if [ "$t" -gt "$bt" ]; then bt=$t; best=$d; fi; done
+          echo "using $best"; cd ..
+          find ai-passport/main -maxdepth 1 -type f \( -name '*.c' -o -name '*.h' -o -name CMakeLists.txt \) -delete
+          cp "src/$best"/* ai-passport/main/
+      - uses: espressif/esp-idf-ci-action@v1
+        with: {esp_idf_version: v5.5.3, target: esp32c3, path: ai-passport, command: idf.py build && idf.py merge-bin -o island-full.bin}
+      - uses: actions/upload-artifact@v4
+        with: {name: island-firmware-latest, path: ai-passport/build/island-full.bin}
+      - name: publish bin
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          gh release delete firmware -y --cleanup-tag -R "$GITHUB_REPOSITORY" || true
+          gh release create firmware ai-passport/build/island-full.bin -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title island-full.bin --notes "built from $GITHUB_SHA"
